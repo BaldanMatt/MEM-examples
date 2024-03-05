@@ -1,0 +1,55 @@
+# Effect of shrinkage in Mixed Effect Models
+
+https://m-clark.github.io/posts/2019-05-14-shrinkage-in-mixed-models/
+
+We will start form a basic mixed model with a random intercept and a random slope for a single predictor variable. 
+There are a number of ways to wrtie such models, and the following does so for a single cluster $c$ and observation $i$.
+
+$y$ is a function of the Ione covariate $x$, and otherwise we have a OLS.
+
+Random effects:
+- Cluster
+
+Fixed effects:
+- Intercept
+- Effect of X
+
+The random effects are multivariate normally distributes with some covariance.
+The observation noise $\sigma$ is assumed constant across observations.
+$\begin{array}{}\mu_{ic} = (b_0+re_{0c}) + (b_1 + re_{1c})\cdot x_{ic}\\re_{0},re_{1}\text{~}\mathcal{N}(0,\Sigma)\\y\text{~}\mathcal{N}(\mu,\sigma^2)\end{array}$
+
+## DATA
+-- obs_per_cluster = 10
+-- n_cluster = 100
+-- intercept = 1
+-- beta = .5
+-- sigma = 1
+-- sd_intercept = .5
+-- sd_slope_x_random = .25
+-- cor = 0
+-- balanced = 1
+-- seed = 888
+
+$x$ is standardized variable with mean zero and standard deviation of 1. Unless a fraction is provided for balanced, the N total sample size is equal to n_cluster * n_obs_per_cluster.
+
+```{r}
+create_data <- function(obs_per_cluster=10, n_cluster = 100,
+                        intercept = 1,
+                        beta = .5
+                        sigma = 1,
+                        sd_int = .5,
+                        sd_slope = .25,
+                        cor = 0,
+                        balanced = TRUE,
+                        seed = 888) {
+  set.seed(seed)
+  
+  cluster = rep(1:n_cluster, each=obs_per_cluster)
+  N = n_cluster * obs_per_cluster
+  x = rnorm(N)
+  
+  varmat = matrix(c(sd_int^2, cor, cor, sd_slope^2), 2, 2)
+  re = mvtnorm::rmvnorm(n_cluster, sigma=varmat)
+}
+```
+

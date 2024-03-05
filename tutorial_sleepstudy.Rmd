@@ -1,0 +1,351 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+```{r}
+library(tidyverse)
+library(lme4)
+library(ggplot2)
+```
+
+# Dataset Generation
+
+```{r}
+# GLOBAL VARIABLES
+N_OBSERVATIONS <- 100
+
+# Local group variables
+mean_A <- 25
+sd_A <- 3
+mean_B <- 50
+sd_B <- 8
+
+A <- rnorm(N_OBSERVATIONS, mean = mean_A, sd = sd_A)
+B <- rnorm(N_OBSERVATIONS, mean = mean_B, sd = sd_B)
+```
+
+## Dataset investigation
+
+-   Gather pivots the two columns A and B to be the Key column related to the Value
+    column that is collecting the values of the observations of A and B.
+    Basically is a hstack of A and B.
+-   Mutate generates a new column called group that is equal to the values present
+    in key.
+
+```{r}
+df <- data.frame(A = A, B = B) %>%
+      gather() %>%
+      mutate(group = key)
+print(head(df))
+```
+```{r}
+df %>%
+  ggplot(aes(x= value, fill=group)) +
+    geom_density(alpha=.6) +
+    labs(title="Group A vs Group B") + 
+    theme_minimal()
+```
+## Explanation of Ordinary Least square regression
+
+The two, looks pretty different. We could quantify their differences by using 
+\textit{ordinary least square regression}, predicting \textit{value} from \textit{group}
+
+$Y~X+\epsilon$
+X:= predictor or fixed effect
+$\epsilon$:= error term that encompasses everything that the model does not know about where
+the variance of Y might come from. Basically it's the variance of Y that is not
+correlated with X.
+$Y~\beta_0 + \beta_1X + \epsilon$
+
+```{r}
+simple_model <- lm(data = df, value ~ group)
+summary(simple_model)
+```
+Lot's of results but our main concern is in the estimate of the coefficient of 
+our predictor variables. In this case the $\beta_1$:
+
+$\beta_1 = 24.9669 \pm 0.7559$ with a significant pvalue <2e-16
+
+```{r}
+print(simple_model$coefficients["(Intercept)"])
+cat("This is the mean of group A: ", mean(A),"\n")
+print(simple_model$coefficient["groupB"])
+```
+In other words the group B is on average 24.96691 units higher than the observations in A. 
+We can verify it by evaluating the difference in the mean of the two groups:
+
+```{r}
+print(mean(B) - mean(A))
+```
+We can also express this visually. The mean of group A is equivalent to the intercept $\beta_0$ and the best-fit line $\beta_1$ connects this intercept to the mean of group B
+
+```{r}
+df %>%
+  ggplot() +
+  geom_boxplot(aes(x=group, y=value)) + 
+  geom_point(aes(x=as.integer(factor(group)), y = value)) + 
+  geom_smooth(aes(x=as.integer(factor(group)), y=value), method="lm") +
+  labs(title="Value across groups A and B") + 
+  theme_minimal()
+```
+
+# When indepencence is not met
+Unfortunately, this independence assumption is not always met. This is problematic for traditional OLS approaches, regardless of what your dependent variable may be.
+
+Let's load a new dataset from lme4 package
+
+```{r}
+sleepstudy <- lme4::sleepstudy
+print(head(sleepstudy))
+```
+In this dataset i understand three features:
+- Reaction
+- Days
+- Subject 
+Reaction may be the value that i'm measuring, while Days and Subject are clearly some metadata that i can exploit to understand if data are independent from each other or not. For example, measures coming from the same subject may be correlated between each other. Same thing for observaitons coming from the same day. Let's think that whoever collected the data may be a source of variability, therefore, observations collected the same date may be correlated to each other.
+
+## Naive analysis
+Let's pretend that we did not know about the source of non-independence
+```{r}
+sleepstudy %>%
+  ggplot(aes(x=Days,y=Reaction)) + 
+  geom_point() + 
+  geom_smooth(method="lm") + 
+  labs(title= "RT (Reaction times) over successive days") + 
+  theme_minimal()
+```
+
+Looks like there is a positive relationship between Days and Reaction time. As we would expect, more sleep deprivation leads to slower reaction times. Let's try to model this relationship with OLS.
+
+```{r}
+naive_model <- lm(data = sleepstudy,
+                  Reaction ~ Days)
+summary(naive_model)
+```
+The naive model shows that for eahc continued day without sleep the reaction times increase by an average of 10.47.
+The average starting reaction times is 251.405
+
+However, we recall that we have observaitons from 18 different subjects, that may have some variability in their overall reaciton time. They may also show variability in how resilient they are to sleep deprivation.
+
+## Non-Independence analysis
+reorder: = 
+
+```{r}
+sleepstudy %>%
+  ggplot(aes(x=reorder(Subject,Reaction),
+             y=Reaction)) + 
+  geom_boxplot() + 
+  labs(title="Subject-level variance in RT", x = "Subject") + 
+  theme_minimal()
+```
+# Mixed Models: a Walkthrough
+ The sleepstudy dataset is an example of data with \textbf{nested structure}. In this case are manifested as multiple observations coming from the same subject,
+ 
+ 1) Random intercepts: Control for subject-level variance in Y
+ 2) Random slopes: Control for subject-level variance in the effect of X on Y
+ 
+## Random Intercepts: accounting for nested variance in Y
+Let's say that different people differ in their average reaciton time, regardless of how sleep deprived they are. We can incorporate it into our model as something called \textbf{random effect} by saying that the Reaction time is modeled as:
+ 
+  Reaction ~ Days + (1 | Subject)
+ 
+Some time expetiments will involve other kinds of nested structure, such as item-level variance. Our current dataset averages across all observations for a subject in a given date. But if it did, and these items exhibited nested strucutre, we could model it as follows:
+
+This is an example of an alternative:
+  Reaction ~ Days + (1 | Subject) + (1 | Item)
+  
+## Random Slopes: accounting for nested variance in the effect of X on Y
+Subjects may vary in their effect of sleep deprivation on reaction time. THis is actually not unreasonable to assume. Some may act perfectly even with only 2-3 hours of sleep, while others won't.
+
+We can actually visualize this variability by drawin separate best-fit lines for each subject.
+
+```{r}
+sleepstudy %>%
+  ggplot(aes(x=Days,y=Reaction,color=Subject)) + 
+  geom_point() + 
+  geom_smooth(method="lm",se=FALSE) + 
+  labs(title="RT over successive days for each subject") +
+  theme_minimal()
+```
+
+Our ultimate goal may be to come up with a coefficient estimate for the effect of Days. To do so, we need to account for the fact that not all subjects show this effect on equal degrees. 
+
+The actual model would then also have a random effect on the effect of the predictory variable Days over the Reaction times for each subject.
+
+  Reaction ~ Days + (1 + Days | Subject)
+  
+```{r}
+model_full = lmer(data = sleepstudy,
+                  Reaction ~ Days + (1 + Days | Subject),
+                  REML = FALSE)
+summary(model_full)
+```
+Differences with OLS:
+- There is no \texit{p-value} associated information with the coefficients.
+
+This is an intentional design by the author of lme4, and has to do with the way lme4 calculates its t- and F- statitics. If you really want to estimate the p-values for each coefficient, you can import the package lmerTest and rerun the model. The standard approach to select mixem models is not by significance of the coefficients but by model comparison.
+
+## Model comparison
+The core idea behind the model comparison approach is to compare the \textbf{explanatory power} of two or more models. Of course a model with more parameters will always explain more variance than a model with less. However, this can result in overfitting. A model whose parameters are too tuned to the variance specific to a particular dataset, and thus exhibits poor generalizability across datasets. So reducing variance in Y is not out only goals. We also want a parsimonious model.
+
+1) Comparing the amount of variance explained of two models
+2) Enforcing model parsimony. We prefer a simpler model.
+
+We'll be using the so called likelihood ratio test.
+
+```{r}
+# We omit the fixed effect of Days.
+model_reduced <- lmer(data = sleepstudy,
+                      Reaction ~ (1 + Days | Subject),
+                      REML = FALSE)
+```
+
+```{r}
+comparison <- anova(model_full, model_reduced)
+comparison
+```
+
+```{r}
+chisq = round(comparison$Chisq[2],2)
+chisq
+```
+
+```{r}
+df <- comparison$Df[2]
+df
+```
+```{r}
+pvalue <- comparison$`Pr(>Chisq)`[2]
+pvalue
+```
+There is a fair amount of output here:
+- loglik: this refers to the log-likelihood values for each of the models.             model_reduced has more negative value, indicaitng a lower                 likelihood of the full model. 
+            Likelihood Ratio: LR = -2 * (LLreduce - LLfull)
+- Chisq: this is the chi-squared statistic that we'll be looking up to                obtain our p-value. Note that is identical to the LR
+- DF: this is the difference in degrees of freedom between our models.
+- Pr(>Chisq): this is the probability of obtaining a chi-squared statistic             that high under the null hypothesis, i.e., our p-value
+
+The p-value indicates that the difference in model likelihoods is quite significant, i.e., this Chisq statistic is quite unlikely under the corresponding null distribution.
+
+We interpret the results as follow:
+adding a fixed effect of Days significantly increases the explanatory power of our model.
+
+\textit{A model including a fixed effect of Days, as well as by-subject random slopes for the effect of Days (and by-subject random intercepts), explained significantly more variance than a reduced moedl omitting only the fixed effect of Days [X^2(1)=23.54, p=1.2256e^-6]}
+
+We can also inspect the direction of the effect of Days.
+
+```{r}
+coef_days = fixef(model_full)["Days"]
+coef_days
+```
+
+As in the OLS regression, the coefficient is positive and for every day of sleep deprivation we expect participants to slow by an average of 10.47 ms. The difference is that this parameter now accounts for nested variance in the data. 
+
+# Best practices
+
+Sometimes the distinciton between fixed and random effect is defined in terms of "things you care about modeling directly" (fixed) vs "effects related to the population you're interested in modeling" (random).
+
+Some rules of thumb:
+- Should i Include random factor X in the model?
+    If X demonstrates nested strucutre in my dataset, then i include it.      seems preferable to me to try to account for potential nested         variance, and perhaps be overly cautious, than to miss something     important. 
+- Should i enter variable X as a random of fixed effect?
+    This is trickier. It comes down to my a priori assumptions about the relationship between this variable and Y. If i think that X covariates in important, systematic ways with Y, then I enter it as a fixed effect. If i think that each cluster of nested structure in X is essentially random with respect to Y, that is each group in X varies, but not systematically such that we can assume each group has been pulled from some overarching distribution, then i enter it as a random effect. 
+    
+# How do i know how many random effects to include?
+Should you also include random effects for both Item and Subject ID? Further, should you model them as random intercepts random slopes or both??
+
+Standard advice, "Keep it Maximal". Using simulation based analyses, the author demonstrate that the best way to minimize false positive rates and improve generalizability is to begin with a maximally specified model: include both slopes and intercepts for all random factors: this can sometimes result in pretty complicated models, such as the one below:
+
+  Y = X1*X2 + (X1*X2 | Subject ) + (X1*X2 | Item ) + (X1 * X2 | Group)
+  
+Which is basically the same as saying:
+Calculate by-subject, by-item, and by-group random slopes for the effect of X1, X2 and their interaction as well as random intercepts for all those variables.
+
+A common issue is that the model won't converge. Then do the following:
+1) Rescale and center continous parameters. Differences in the scales of the parameters can lead to issues in estimating std of fixed effects.
+2) Use a different optimizer, for example bobyqa optimizer. lmerControl(optimizer="bobyqa")
+3) Simplify the model.
+
+If 1) and 2) both fail, then you can take a principled approach to 3). You can use the same model comparison procedure described earlier using the LRtests and reduce the model iteratively.
+
+## How are estimates for random factor computed?
+Estimates for random factors are calculated using something called shrinkage (sometimes called partial pooling or regularizaiton). 
+
+### Theoretical background
+When we compute estimates for each group, we assume that they are pulled from a normal distribution around the overall mean for those values across all groups. Hence the term shrinkage. Rather than being allowed to vary freely, the estimates are constrained in terms of the values they can take on. 
+
+We can compare this to two extreme cases:
+1) Consider the case in which we have no random factors. Typical OLS. We are not accounting for any nested structure and computing a single intercept for the entire dataset. This intercept is "pooled" over all observations.
+  Y ~ $\beta_0 + \beta_1 X + \epsilon$
+2) Consider the extreme case in whic we compute a different intercept for each group adn this intercept is allowed to vary freely for each participant:
+  $Y~\beta_{0i}+\beta_1 X + \epsilon$
+In this case, any given beta0i will be equivalent that Participant's mean Y.
+3) Consider the case of shrinkage, where we allow each person's intercept to vary, but we model these intercepts as normally distributed around the group mean.
+
+### Example
+
+```{r}
+# We are basically evaluating the overall mean of the population reaction times.
+# Then, we are grouping by subject and creating a we new column mean_rt that will contain the average value of Reaction times for each subject. 
+# Then we are mutating by adding a new column that is the average value of the Reaction times for eeach subject centered around the average value of the whole population. 
+
+group_mean <- mean(sleepstudy$Reaction)
+
+by_subject <- sleepstudy %>%
+  group_by(Subject) %>%
+  summarise(mean_rt = mean(Reaction)) %>%
+  mutate(mean_rt_centered = mean_rt - group_mean)
+```
+```{r}
+by_subject %>%
+  ggplot(aes(x=mean_rt_centered)) + 
+  geom_histogram(bins=20) + 
+  labs(title="Mean RT by subject (Centered)", x="Mean RT (Centered)") +
+  scale_x_continuous(limits=c(-100,100)) + 
+  theme_minimal()
+```
+Now let's extract the random intercepts from a model only icluding our random intercepts:
+```{r}
+model_null <- lmer(data =sleepstudy,
+                   Reaction ~ (1 | Subject),
+                   REML = FALSE)
+by_subject$random_intercepts = ranef(model_null)$Subject$`(Intercept)`
+
+by_subject %>%
+  ggplot(aes(x=random_intercepts)) + 
+  geom_histogram(bins=20) + 
+  labs(title = "Random intercepts for each subject",
+      x = "Random intercept") +
+  scale_x_continuous(limits=c(-100,100)) +
+  theme_minimal()
+```
+This plot looks very similar to the one showing each subject's mean RT. This is exactly what we would expect. Recall that the intercepts are meant to account for subject level variance in Reaction. 
+
+\textbf{However}, the random intercepts are also subject to shrinkage, meaning they're assumed to be drawn from a normal distribution around the group mean. We can illustrate exactly what this looks like by plotting each subjects mean Reaction against that subject's random intercept. Furthermore, we can shade each point in terms of the difference between the subject's random intercept and their mean RT:
+
+```{r}
+by_subject$difference <- abs(by_subject$random_intercepts - by_subject$mean_rt_centered)
+
+#this shows:
+#1) perfectly linear (as expected)
+#2) slight shrinkage (max/min real RT are slightly larger magnitude than random intercept estimates)
+#3) the differences between real RT and random intercept grow larger as your approach the ends of the distribution
+
+by_subject %>%
+  ggplot(aes(x=mean_rt_centered,
+             y=random_intercepts,
+             color=difference)) +
+  geom_point() + 
+  scale_x_continuous(limits = c(-100,100)) + 
+  scale_y_continuous(limits = c(-100,100)) +
+  labs(title="By-subject intercepts and by-subject mean RTs",
+       x="By subject mean rt (centered)",
+       y="Random intercept") + 
+  theme_minimal()
+```
+
