@@ -1,16 +1,15 @@
 ---
-title: "R Notebook"
-output: html_notebook
+title: "Tutorial-MEM-Pooling-Comparison-SleepStudyData"
+output:
+  pdf_document: default
+  html_notebook: default
 ---
-
-This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
-
-Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
 
 ```{r}
 library(tidyverse)
 library(lme4)
 library(ggplot2)
+library(tibble)
 ```
 
 # Dataset Generation
@@ -53,7 +52,7 @@ df %>%
 ## Explanation of Ordinary Least square regression
 
 The two, looks pretty different. We could quantify their differences by using 
-\textit{ordinary least square regression}, predicting \textit{value} from \textit{group}
+*ordinary least square regression*, predicting *value* from *group*
 
 $Y~X+\epsilon$
 X:= predictor or fixed effect
@@ -143,14 +142,123 @@ sleepstudy %>%
   labs(title="Subject-level variance in RT", x = "Subject") + 
   theme_minimal()
 ```
+# Another example of usage of sleepstudy dataset
+
+## Pooling
+
+This will be the first usage of tibble.
+I tibble sono strutture di dati definite da una classe, costruita come sottoclasse
+di data.frame. Tutti i tibble sono dataframe ma non tutti i dataframe sono tibble.
+
+Un tibble, a differenza di un dataframe, può contenere anche delle liste, purchè il numero
+degli elementi corrisponda al numero delle righe
+
+```{r}
+sleepstudy <- sleepstudy %>%
+  as_tibble() %>%
+  mutate(Subject = as.character(Subject))
+head(sleepstudy)
+```
+```{r}
+# Let's add two new fake subjects
+df_sleep <- bind_rows(sleepstudy, 
+                      tibble(Reaction = c(286,288), Days = 0:1, Subject = "374"),
+                      tibble(Reaction = 245, Days = 0, Subject = "373"))
+```
+Let's visualize all the data by dividing each group.
+
+```{r}
+df_sleep %>%
+  ggplot(aes(x=Days, y=Reaction)) +
+  geom_smooth(method="lm", se=FALSE) +
+  geom_point() +
+  facet_wrap("Subject") +
+  labs(title="Fit of Reaction times over dats for each subject",
+       x="Days of sleep deprivation",
+       y="Average reaction time (ms)") +
+  scale_x_continuous(breaks = 0:4 * 2) +
+  theme_minimal()
+```
+### Complete pooling and no Pooling models
+
+Each of these panels plotted above shows an independently estimated regression line. 
+This approach to fit a separate line for each participant is sometimes called
+the **no pooling** model because none of the information from different participants is combined or pooled together.
+
+We fit a separate line for each cluster of data, unaware that any of the other participants exist.
+
+The lmList() function in lme4 automates this process.
+
+The following code should fit in df_sleep a different line:
+  Y = X where Y is Reaction and X is Days by grouping for each different Subject.
+"|" is the operator to group by a column values.
+
+```{r}
+df_no_pooling <- lmList(Reaction ~ Days | Subject, df_sleep) %>%
+  coef() %>%
+  rownames_to_column("Subject") %>%
+  rename(Intercept = `(Intercept)`, Slope_Days = Days) %>%
+  add_column(Model = "No pooling") %>%
+  filter(Subject != "373")
+head(df_no_pooling)
+```
+In contrast, we might consider **a complete pooling** model where all the information
+from the participants is combined together. We fit a single line for the combined data set,
+unaware that the data came from different participants.
+
+```{r}
+# Fit a model on all the data pooled together
+m_pooled <- lm(Reaction ~ Days, df_sleep)
+
+# Repeat the intercept and slope terms for each participant
+df_pooled <- tibble(
+  Model = "Complete pooling",
+  Subject = unique(df_sleep$Subject),
+  Intercept = coef(m_pooled)[1],
+  Slope_Days = coef(m_pooled)[2]
+)
+head(df_pooled)
+```
+
+Let's compare by not fitting again the line, but by drawing the lines for the 
+no_pooling model and pooling_model
+
+```{r}
+# Join the raw data so we can use plot the points and the lines.
+df_models <- bind_rows(df_pooled, df_no_pooling) %>%
+  left_join(df_sleep, by = "Subject")
+
+p_pooling_comparison <- df_models %>%
+  ggplot(aes(x=Days,
+             y=Reaction)) +
+  geom_abline(aes(intercept=Intercept,
+                  slope=Slope_Days,
+                  color=Model),
+              size=.75) +
+  geom_point() +
+  facet_wrap("Subject") +
+  labs(title = "No Pooling vs Complete pooling fit by Subject",
+       x="Days of sleep deprivation",
+       y="Average Reaction times (ms)") +
+  scale_x_continuous(breaks = 0:4*2) + 
+  scale_color_brewer(palette="Dark2") +
+  theme(legend.position = "bottom", legend.justification = "right") +
+  theme_minimal()
+p_pooling_comparison
+```
+
+The complete pooling model estimates a single line, and we see that same line 
+drawn on every facet. One advantage is that the model can make a guess about the line for 373, who only has one observation. The model looks terrible elsewhere, 309, 310, etc...
+In contrast the no pooling data approach can follow the data, without being able to make a guess on 373 though.
+
 # Mixed Models: a Walkthrough
- The sleepstudy dataset is an example of data with \textbf{nested structure}. In this case are manifested as multiple observations coming from the same subject,
+ The sleepstudy dataset is an example of data with **nested structure**. In this case are manifested as multiple observations coming from the same subject,
  
  1) Random intercepts: Control for subject-level variance in Y
  2) Random slopes: Control for subject-level variance in the effect of X on Y
  
 ## Random Intercepts: accounting for nested variance in Y
-Let's say that different people differ in their average reaciton time, regardless of how sleep deprived they are. We can incorporate it into our model as something called \textbf{random effect} by saying that the Reaction time is modeled as:
+Let's say that different people differ in their average reaciton time, regardless of how sleep deprived they are. We can incorporate it into our model as something called **random effect** by saying that the Reaction time is modeled as:
  
   Reaction ~ Days + (1 | Subject)
  
@@ -186,12 +294,12 @@ model_full = lmer(data = sleepstudy,
 summary(model_full)
 ```
 Differences with OLS:
-- There is no \texit{p-value} associated information with the coefficients.
+- There is no \textit{p-value} associated information with the coefficients.
 
 This is an intentional design by the author of lme4, and has to do with the way lme4 calculates its t- and F- statitics. If you really want to estimate the p-values for each coefficient, you can import the package lmerTest and rerun the model. The standard approach to select mixem models is not by significance of the coefficients but by model comparison.
 
 ## Model comparison
-The core idea behind the model comparison approach is to compare the \textbf{explanatory power} of two or more models. Of course a model with more parameters will always explain more variance than a model with less. However, this can result in overfitting. A model whose parameters are too tuned to the variance specific to a particular dataset, and thus exhibits poor generalizability across datasets. So reducing variance in Y is not out only goals. We also want a parsimonious model.
+The core idea behind the model comparison approach is to compare the **explanatory power** of two or more models. Of course a model with more parameters will always explain more variance than a model with less. However, this can result in overfitting. A model whose parameters are too tuned to the variance specific to a particular dataset, and thus exhibits poor generalizability across datasets. So reducing variance in Y is not out only goals. We also want a parsimonious model.
 
 1) Comparing the amount of variance explained of two models
 2) Enforcing model parsimony. We prefer a simpler model.
@@ -235,7 +343,7 @@ The p-value indicates that the difference in model likelihoods is quite signific
 We interpret the results as follow:
 adding a fixed effect of Days significantly increases the explanatory power of our model.
 
-\textit{A model including a fixed effect of Days, as well as by-subject random slopes for the effect of Days (and by-subject random intercepts), explained significantly more variance than a reduced moedl omitting only the fixed effect of Days [X^2(1)=23.54, p=1.2256e^-6]}
+*A model including a fixed effect of Days, as well as by-subject random slopes for the effect of Days (and by-subject random intercepts), explained significantly more variance than a reduced moedl omitting only the fixed effect of Days [X^2(1)=23.54, p=1.2256e^-6]*
 
 We can also inspect the direction of the effect of Days.
 
@@ -326,7 +434,7 @@ by_subject %>%
 ```
 This plot looks very similar to the one showing each subject's mean RT. This is exactly what we would expect. Recall that the intercepts are meant to account for subject level variance in Reaction. 
 
-\textbf{However}, the random intercepts are also subject to shrinkage, meaning they're assumed to be drawn from a normal distribution around the group mean. We can illustrate exactly what this looks like by plotting each subjects mean Reaction against that subject's random intercept. Furthermore, we can shade each point in terms of the difference between the subject's random intercept and their mean RT:
+**However**, the random intercepts are also subject to shrinkage, meaning they're assumed to be drawn from a normal distribution around the group mean. We can illustrate exactly what this looks like by plotting each subjects mean Reaction against that subject's random intercept. Furthermore, we can shade each point in terms of the difference between the subject's random intercept and their mean RT:
 
 ```{r}
 by_subject$difference <- abs(by_subject$random_intercepts - by_subject$mean_rt_centered)
@@ -347,5 +455,216 @@ by_subject %>%
        x="By subject mean rt (centered)",
        y="Random intercept") + 
   theme_minimal()
+```
+## Partial pooling with MEM
+We saw before that no pooling and complete pooling are two ways to approach the
+dataset. However, they have pros and cons.
+We can do better with MEM models, since we can pool information from all the 
+groups to improve the estimates of each individual group. This is called **partial pooling**.
+
+```{r}
+model <- lmer(Reaction ~ 1 + Days + (1 + Days | Subject), df_sleep)
+arm::display(model)
+```
+The first two coef.est items are the "fixed effects" estimates. 
+
+The model also assumes that each participant's individual intercept and slope are deviation from this average, and these random deviations drawn from a distribution of possible intercept and slope parameters. These are randomly varying or random effects. The information in the *Error terms* area describes the distribution of the effects.
+
+Let's visualize these estimates:
+```{r}
+# Make a dataframe with the fitted effects
+df_partial_pooling <- coef(model)[["Subject"]] %>%
+  rownames_to_column("Subject") %>%
+  as_tibble() %>%
+  rename(Intercept = `(Intercept)`, Slope_Days = Days) %>%
+  add_column(Model = "Partial pooling")
+head(df_partial_pooling)
+```
+Let's update the plot presented in `Chunk 18` of Complete pooling and no pooling models.
+
+```{r}
+df_models <- bind_rows(df_pooled, df_no_pooling, df_partial_pooling) %>%
+  left_join(df_sleep, by="Subject")
+p_pooling_comparison %+% df_models
+```
+Most of the time, the no pooling and partial pooling lines are on top of each other. But when the two differ, it's because the partial pooling model's line is pulled slightly towards the complete-pooling line.
+
+```{r}
+df_zoom <- df_models %>% 
+  filter(Subject %in% c("335", "350", "373", "374"))
+
+p_pooling_comparison %+% df_zoom
+```
+## Shrinkage
+The partial pooling model pulls more extreme estimates towards an overall average.
+We can visualize this effect by plotting a scatterplot of intercept and slope parameters from each model and cnnecting estimates for the same partecipant.
+
+First usage of Distinct:
+- Unique of combination of columns. In this case The complete pooling has a single average value for the intercept and slope_days for every subject
+
+```{r}
+df_fixedf <- tibble(
+  Model = "Partial pooling (average)",
+  Intercept = fixef(model)[1],
+  Slope_Days = fixef(model)[2]
+)
+
+# Complete pooling / fixed effects are center of gravity in the plot
+df_gravity <- df_pooled %>%
+  distinct(Model, Intercept, Slope_Days) %>%
+  bind_rows(df_fixedf)
+df_gravity
+
+df_pulled <- bind_rows(df_no_pooling, df_partial_pooling)
+df_pulled %>%
+  ggplot(aes(x=Intercept,
+             y=Slope_Days,
+             color=Model,
+             shape=Model)) + 
+  # Draw all points of no pooling and partial pooling
+  geom_point(size=2) +
+  # Draw intercept and slope of complete pooling vs partial pooling
+  geom_point(data = df_gravity,
+             size= 5,
+             show.legend = FALSE) +
+  # Draw an arrow connecting the observations between models
+  geom_path(aes(group=Subject,
+                color=NULL),
+            arrow=arrow(length=unit(.02,"npc")),
+            show.legend=FALSE) +
+  # Use ggrepel to jitter the labels away from the points for visibility
+  ggrepel::geom_text_repel(aes(label=Subject,
+                               color=NULL),
+                           data=df_no_pooling,
+                           show.legend = FALSE) +
+  # Don't forget subject 373, which is not collected by no_pooling
+  ggrepel::geom_text_repel(aes(label=Subject,
+                               color=NULL),
+                           data=filter(df_partial_pooling,
+                                       Subject == "373"),
+                           show.legend = FALSE) +
+  theme(
+    legend.position="bottom",
+    legend.justification="right"
+  ) + 
+  labs(title="Pooling of regression parameters",
+       x="Intercept estimate",
+       y="Slope estimate") +
+  scale_shape_manual(values = c(15:18)) +
+  scale_color_brewer(palette = "Dark2") 
+```
+The pull is greater for more extreme values. The lines near that center point are very short. The lines in general get longer as we move away from the complete pooling estimate.
+The fewer the observations in a cluster, the more information is borrowed from other clusters, and the greater the pull towards the average estimate. 
+
+## Topographic map of Parameters
+
+We want to visualize the distribution of the randomly varying effects.
+It's not a routine visualization, but it reveals a little more about where estimates are being pulled towards.
+
+Imagine that the laast plot is a landscape, and fixed effects point is the peak of a hill. What we are going to do is draw a topographic map with contour lines to show different elevation regions on that hill.
+
+First, let's extract the covariance matrix estimated by the model.
+```{r}
+# Extract the matrix
+cov_mat <- VarCorr(model)[["Subject"]]
+# Stripp off some details so that just the useful part is printed
+attr(cov_mat, "stddev") <- NULL
+attr(cov_mat, "correlation") <- NULL
+cov_mat
+```
+This means that the Subject, which is the both for a random intercept and a random slope the grouping variable for the random effects, has a covariance matrix that describes the covariance between the intercept effect and the slope on the Days explanatory variable.
+
+To do so, we draw count lines of confidence regions of the two parameters.
+
+Confidence region:
+In statistic, a confidence region typically refers to a region in the parameters space where the parameters are likely to lie with a certain level of confidence. The confidence level associated with a pairwise confidence region represents the probability that the region will contain the true values of the parameters of interest in repeated sampling.
+
+```{r}
+# Helper function to make a data-frame of ellipse points that includes the levels as a column
+make_ellipse <- function(cov_mat, center, level){
+  ellipse::ellipse(cov_mat, centre=center, level=level) %>%
+    as.data.frame() %>%
+    add_column(level=level) %>%
+    as_tibble()
+}
+
+center <- fixef(model)
+# Level:
+# The confidence level of a pairwise confidence region. The default is 0.95, for a 95% region. This is used to control the size of the ellipse being plotted. A vector of levels may be used.
+levels <- c(.1, .3, .5, .7, .9)
+
+# Create an ellipse dataframe for each of the levels defined above and combine them
+df_ellipse <- levels %>%
+  lapply(
+    function (x) make_ellipse(cov_mat, center, level=x)
+  ) %>%
+  bind_rows() %>%
+  rename(Intercept = `(Intercept)`, Slope_Days = Days)
+head(df_ellipse)
+```
+
+```{r}
+# Euclidean distance
+contour_dist <- function(xs, ys, center_x, center_y) {
+  x_diff <- (center_x - xs) ^ 2
+  y_diff <- (center_y - ys) ^ 2
+  sqrt(x_diff + y_diff)
+}
+
+# Find the point to label in each ellipse.
+df_label_locations <- df_ellipse %>% 
+  group_by(level) %>%
+  filter(
+    Intercept < quantile(Intercept, .25), 
+    Slope_Days < quantile(Slope_Days, .25)
+  ) %>% 
+  # Compute distance from center.
+  mutate(
+    dist = contour_dist(Intercept, Slope_Days, fixef(model)[1], fixef(model)[2])
+  ) %>% 
+  # Keep smallest values.
+  top_n(-1, wt = dist) %>% 
+  ungroup()
+
+# I also want to add the number of the topological contours evaluated in df_label_locations
+
+ggplot(df_pulled) + 
+  aes(x = Intercept, y = Slope_Days, color = Model, shape = Model) + 
+  # Draw contour lines from the distribution of effects
+  geom_path(
+    aes(group = level, color = NULL, shape = NULL), 
+    data = df_ellipse, 
+    linetype = "dashed", 
+    color = "grey40"
+  ) + 
+  geom_point(
+    aes(shape = Model),
+    data = df_gravity, 
+    size = 5,
+    show.legend = FALSE
+  ) + 
+  geom_point(size = 2) + 
+  geom_path(
+    aes(group = Subject, color = NULL), 
+    arrow = arrow(length = unit(.02, "npc")),
+    show.legend = FALSE
+  ) + 
+  geom_text(aes(label=level,
+                color=NULL,
+                shape=NULL),
+            data=df_label_locations,
+            nudge_x=.5,
+            nudge_y=.8,
+            size=3.5,
+            color="grey40") +
+  theme(
+    legend.position = "bottom", 
+    legend.justification = "right"
+  ) + 
+  ggtitle("Topographic map of regression parameters") + 
+  xlab("Intercept estimate") + 
+  ylab("Slope estimate") + 
+  scale_color_brewer(palette = "Dark2") +
+  scale_shape_manual(values = c(15:18))
 ```
 

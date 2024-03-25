@@ -35,7 +35,7 @@ $x$ is standardized variable with mean zero and standard deviation of 1. Unless 
 ```{r}
 create_data <- function(obs_per_cluster=10, n_cluster = 100,
                         intercept = 1,
-                        beta = .5
+                        beta = .5,
                         sigma = 1,
                         sd_int = .5,
                         sd_slope = .25,
@@ -50,6 +50,19 @@ create_data <- function(obs_per_cluster=10, n_cluster = 100,
   
   varmat = matrix(c(sd_int^2, cor, cor, sd_slope^2), 2, 2)
   re = mvtnorm::rmvnorm(n_cluster, sigma=varmat)
+  
+  colnames(re) = c('Intercept','x')
+  
+  y = (intercept + re[cluster, 'Intercept']) + (beta + re[cluster,'x'])*x + rnorm(N, sd=sigma)
+  
+  df = tibble(y,x,cluster)
+  
+  if (balanced < 0 | balanced > 1) {
+    stop('Balanced should be a proportion to sample.')
+  } else {
+    df = sample_frac(df,balanced)
+  }
+  df
 }
 ```
 
